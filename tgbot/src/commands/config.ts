@@ -1,5 +1,5 @@
 import { TelegrafFn } from "../types";
-import config from "./../config.json"
+const config: any[] = []; // TODO получать аргументом, а аргумент из БД
 
 export const configCommand: TelegrafFn = ctx => {
   ctx.reply(`

@@ -14,8 +14,7 @@ curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
 ```
 2. Установите NodeJS
 ```Bash
-nvm install 20
-nvm use 20
+nvm use
 ```
 3. Проверьте результат
 ```Bash
@@ -27,7 +26,31 @@ npm -v  # 10.2.4
 npm install
 ```
 
+### База данных
+
+Поднимитe какую-нибудь БД где-нибудь. Например так (поднимет docker контейнер с БД на порту 5432):
+
+```Bash
+docker run -d --name postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres
+```
+
 ### Запустите бота
+
+#### Переменные окружения
+
+Должен быть файл .env с переменными окружения:
+
+```Bash
+BOT_TOKEN= # Токен бота
+PG_HOST= # Хост базы данных
+PG_PORT= # Порт базы данных
+PG_USER= # Пользователь базы данных
+PG_PASSWORD= # Пароль базы данных
+PG_DATABASE= # Название базы данных
+IS_DEV= # В деве чистим БД перед стартом и добавляем тестовые данные
+```
+
+#### Запуск
 
 ```Bash
 npm start
