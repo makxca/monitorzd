@@ -1,4 +1,4 @@
-import config from "./config.json"
+const config: any[] = []; // TODO получать аргументом, а аргумент из БД
 
 type Found = {
   Trains: {
