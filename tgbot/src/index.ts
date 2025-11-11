@@ -4,12 +4,12 @@ dotenv.config({
 })
 
 import { Telegraf } from "telegraf"
-import { findAll } from "./findTrains"
+import { findByFilters } from "./findTrains"
 import fs from "node:fs"
-import { sequelize } from './model'
+import { sequelize, Subscription } from './model'
 sequelize.sync();
 
-import { checkCommand, configCommand, helpCommand, startCommand, whoisthisCommand } from "./commands"
+import { helpCommand, startCommand, whoisthisCommand } from "./commands"
 
 const bot = new Telegraf(process.env.BOT_TOKEN!)
 
@@ -17,16 +17,8 @@ const ids: number[] = []; // TODO: получать из БД
 
 bot.telegram.setMyCommands([
   {
-    command: "check",
-    description: "Единоразово проверить все поезда из конфигурации (спроси у @makxca)"
-  },
-  {
     command: "subscribe",
     description: "Подписаться на рассылку. Проверки проводятся каждые 10 минут"
-  },
-  {
-    command: "config",
-    description: "Посмотреть конфигурацию"
   },
   {
     command: "unsubscribe",
@@ -37,8 +29,6 @@ bot.telegram.setMyCommands([
 bot.start(startCommand)
 bot.help(helpCommand)
 bot.command("whoisthis", whoisthisCommand)
-bot.command("check", checkCommand)
-bot.command("config", configCommand)
 bot.command("unsubscribe", ctx => {
   if (!ids.includes(ctx.from.id)) {
     ctx.reply("Вы не подписаны на рассылку")
@@ -63,16 +53,20 @@ console.log("\n\nBot successfully started")
 
 async function monitoring() {
   console.log("Monitoring", new Date().toLocaleTimeString("ru"))
-
-  const s = await findAll()
-  if (s) {
-    ids.forEach(id => bot.telegram.sendMessage(id, s, { parse_mode: "Markdown" }))
+  const users = await Subscription.findAll();
+  for (const user of users) {
+    const result = await findByFilters(user.get().filters)
+    if (result) {
+      bot.telegram.sendMessage(user.get().telegramId, result, { parse_mode: "Markdown" })
+    }
   }
+  
 
+  // не раз в 10m, а раз в 10m±50s
   setTimeout(monitoring, 10 * 60 * 1000 + (Math.random() - 0.5) * 100000)
 }
 
-setTimeout(monitoring, 20000)
+setTimeout(monitoring, 2000)
 
 // Enable graceful stop
 process.once('SIGINT', () => bot.stop('SIGINT'))
