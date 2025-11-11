@@ -6,9 +6,11 @@ interface SubscriptionAttributes {
   filters: {
     "departureDate": string // "2025-12-30T00:00:00",
     "origin": string // "2000000",
+    "originNodeId": string // "5a323c29340c7441a0a556bb", используется для построения URL страницы поиска
     "destination": string // "2004000",
+    "destinationNodeId": string // "5a3244bc340c7441a0a556ca", используется для построения URL страницы поиска
     "carType": "plaz" | "coop" | "SV" | "sitting" | null,
-    "maxPrice": 12345 // число в рублях
+    "maxPrice": number // число в рублях
   }[];
 }
 
