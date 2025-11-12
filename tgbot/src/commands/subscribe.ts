@@ -1,209 +1,323 @@
 import { Scenes, Markup } from "telegraf";
 import { Subscription } from "../model/Subscription.js";
+import { fetchStationSuggestions, Station } from "../lib/fetchStationSuggestions.js";
+import { isValidDate, isValidPrice } from "../lib/utils.js";
 
-const seatTypes = ['plaz', 'coop', 'SV', 'sitting'];
+const seatTypeNameByType = {
+  plaz: 'Плацкарт',
+  coop: 'Купе',
+  SV: 'СВ',
+  sitting: 'Сидячее',
+} as const;
 
-export const createSubscriptionScene = new Scenes.WizardScene<Scenes.WizardContext>(
-  "create-subscription",
-  // дата отправления
-  async (ctx) => {
-    await ctx.reply("Введите дату отправления (в формате YYYY-MM-DD):");
-    return ctx.wizard.next();
+type SeatType = keyof typeof seatTypeNameByType;
+const seatTypes: SeatType[] = ["plaz", "coop", "SV", "sitting"];
+
+interface SubscriptionData {
+  departureDate?: string;
+  origin?: Station[];
+  destination?: Station[];
+  maxPrice?: number;
+  carType?: SeatType;
+}
+
+interface SubscriptionWizardSession extends Scenes.WizardSessionData {
+  stepIndex: number;
+  inEditing: boolean;
+
+  data: SubscriptionData;
+
+  selectingStationFor?: "origin" | "destination" | null;
+  stationOptions?: Station[];
+  selectedStations?: Station[];
+  lastStationMessageId?: number;
+}
+
+interface SubscriptionWizardContext extends Scenes.WizardContext {
+  session: SubscriptionWizardSession;
+}
+
+interface Step {
+  key: keyof SubscriptionData;
+  label: string;
+  message: string;
+  validate?: (text: string) => Promise<any> | any;
+  error: string;
+}
+
+const steps: Step[] = [
+  {
+    key: "departureDate",
+    label: "Дата отправления",
+    message: "Введите дату отправления (в формате YYYY-MM-DD):",
+    validate: (t) => (isValidDate(t) ? t : null),
+    error: "❌ Неверный формат даты. Пример: 2025-11-17",
   },
-  // валидация даты
-  async (ctx) => {
-    const departureDate = ctx.message?.text?.trim();
-    if (!departureDate || !isValidDate(departureDate)) {
-      await ctx.reply('❌ Неверный формат даты. Попробуйте ещё раз (например: 2001-05-17)');
-      return;
-    }
-
-    ctx.wizard.state.departureDate = departureDate;
-    await ctx.reply(`✅ Дата принята: ${departureDate}`);
-
-
-    await ctx.reply("Введите станцию отправления");
-    return ctx.wizard.next();
+  {
+    key: "origin",
+    label: "Пункт отправления",
+    message: "Введите пункт отправления:",
+    error: "❌ Станция отправления не найдена. Попробуйте уточнить название.",
   },
+  {
+    key: "destination",
+    label: "Пункт назначения",
+    message: "Введите пункт назначения:",
+    error: "❌ Станция назначения не найдена. Попробуйте уточнить название.",
+  },
+  {
+    key: "maxPrice",
+    label: "Максимальная цена",
+    message: "Введите максимальную допустимую стоимость билета:",
+    validate: (t) => (isValidPrice(t) ? Number(t) : null),
+    error: "❌ Введите корректную сумму в рублях (например: 1500)",
+  },
+  {
+    key: "carType",
+    label: "Тип места",
+    message: "Выберите тип места:",
+    error: "",
+  },
+];
 
-  // валидация станции отправления
-  async (ctx) => {
-    const query = ctx.message?.text?.trim();
-    if (!query) {
-      await ctx.reply('Введите название станции текстом:');
-      return;
-    }
+export const createSubscriptionScene = new Scenes.BaseScene<SubscriptionWizardContext>(
+  "create-subscription"
+);
 
+// При входе в сцену данные заполняются дефолтными значениями
+createSubscriptionScene.enter(async (ctx) => {
+  ctx.session.stepIndex = 0;
+  ctx.session.inEditing = false;
+  ctx.session.data = {};
+  ctx.session.selectingStationFor = null;
+  ctx.session.stationOptions = [];
+  ctx.session.selectedStations = [];
+  ctx.session.lastStationMessageId = undefined;
+  await sendWithKeyboard(ctx, "🚆 Начинаем создание подписки!");
+  await ask(ctx);
+});
+
+// Обработчик выхода из сцены создания подписки
+createSubscriptionScene.hears(["❌ Отмена", "отмена", "cancel"], async (ctx) => {
+  ctx.session = {} as SubscriptionWizardSession;
+  await ctx.reply("❌ Создание подписки отменено.", Markup.removeKeyboard());
+  ctx.scene.leave();
+});
+
+// Обработчик возвращения на предыдущий шаг
+createSubscriptionScene.hears(["⬅️ Назад", "назад", "back"], async (ctx) => {
+  if (ctx.session.selectingStationFor) {
+    ctx.session.selectingStationFor = null;
+    ctx.session.stationOptions = [];
+    ctx.session.selectedStations = [];
+    return showSummary(ctx);
+  }
+  ctx.session.stepIndex = Math.max(0, ctx.session.stepIndex - 1);
+  await ask(ctx);
+});
+
+// Основной обработчик пользовательского ввода. Сюда попадает все, что пользователь вводит текстом (кроме ❌ Отмена и ⬅️ Назад,
+// на эти действия есть отдельные обработчики)
+createSubscriptionScene.on("text", async (ctx) => {
+  if (ctx.session.stepIndex >= steps.length) return showSummary(ctx);
+
+  const text = ctx.message.text.trim();
+  const step = steps[ctx.session.stepIndex];
+
+  // Станции обрабатываем отдельно, так как тут не совсем тривиальная логика с запросом списка из API РЖД и
+  // предоставлением пользователю множественного выбора
+  if (step.key === "origin" || step.key === "destination") {
     try {
-      const stations = await fetchStationSuggestions(query);
+      const stations = await fetchStationSuggestions(text).catch(() => []);
+      if (!stations.length) return sendWithKeyboard(ctx, step.error);
 
-      if (stations.length === 0) {
-        await ctx.reply('❌ Станция не найдена. Попробуйте уточнить название.');
-        return;
-      }
+      ctx.session.stationOptions = stations;
+      ctx.session.selectedStations = [];
+      ctx.session.selectingStationFor = step.key;
 
-      // Для простоты — берём первую станцию
-      const station = stations[0];
-      ctx.wizard.state.origin = station.expressCode;
-
-      await ctx.reply(`✅ Найдена станция: ${station.name}`);
-
-      await ctx.reply("Введите станцию назначения");
-      return ctx.wizard.next();
-    } catch (err) {
-      console.error(err);
-      await ctx.reply('🚨 Не удалось проверить станцию. Попробуйте еще раз.');
+      return sendStationSelection(ctx);
+    } catch {
+      return sendWithKeyboard(ctx, step.error);
     }
-  },
+  } 
 
-  // валидация станции назначения
-  async (ctx) => {
-    const query = ctx.message?.text?.trim();
-    if (!query) {
-      await ctx.reply('Введите название станции текстом:');
-      return;
-    }
+  // Остальные шаги по стандартному флоу: валидируем пользовательский ввод, инкрементим stepIndex, 
+  // переходим к следующему шагу
+  const result = await step.validate?.(text);
+  if (!result) {
+    await sendWithKeyboard(ctx, step.error);
+    return;
+  }
 
-    try {
-      const stations = await fetchStationSuggestions(query);
+  ctx.session.data[step.key] = result;
 
-      if (stations.length === 0) {
-        await ctx.reply('❌ Станция не найдена. Попробуйте уточнить название.');
-        return;
-      }
+  if (ctx.session.inEditing) {
+    ctx.session.stepIndex = steps.length;
+    ctx.session.inEditing = false;
+    return showSummary(ctx);
+  }
 
-      // Для простоты — берём первую станцию
-      const station = stations[0];
-      ctx.wizard.state.destination = station.expressCode;
-
-      await ctx.reply(`✅ Найдена станция: ${station.name}`);
-
-      await ctx.reply("Введите максимальную допустимую стоимость билетов");
-      return ctx.wizard.next();
-    } catch (err) {
-      console.error(err);
-      await ctx.reply('🚨 Не удалось проверить станцию. Попробуйте еще раз.');
-    }
-  },
-
-  // валидация стоимости + запрос на тип места
-  async (ctx) => {
-    const text = ctx.message?.text?.trim();
-    if (!text || !isValidPrice(text)) {
-      await ctx.reply('❌ Введите корректную сумму в рублях (например: 1500)');
-      return;
-    }
-
-    ctx.wizard.state.maxPrice = Number(text);
-    await ctx.reply(`✅ Максимальная стоимость установлена: ${ctx.wizard.state.maxPrice} руб.`);
-
-    await ctx.reply(
-      'Выберите тип места:',
+  ctx.session.stepIndex++;
+  if(steps[ctx.session.stepIndex].key === "carType") {
+    return ctx.reply(
+      "Выберите тип места:",
       Markup.inlineKeyboard(
-        seatTypes.map((type) => Markup.button.callback(type, `seat_${type}`)),
+        seatTypes.map((t) => Markup.button.callback(seatTypeNameByType[t], `seat_${t}`)),
         { columns: 2 }
       )
     );
-
-    return ctx.wizard.next();
   }
-);
 
-seatTypes.forEach((type) => {
-  createSubscriptionScene.action(`seat_${type}`, async (ctx) => {
-    ctx.wizard.state.carType = type;
-
-    await ctx.answerCbQuery();
-
-    const state = ctx.wizard.state;
-
-    const filters = [
-      {
-        departureDate: state.departureDate,
-        origin: state.origin,
-        destination: state.destination,
-        carType: state.carType,
-        maxPrice: state.maxPrice || 0,
-      },
-    ];
-
-    try {
-      await Subscription.upsert({
-        telegramId: String(ctx.from?.id),
-        filters,
-      });
-
-      await ctx.reply(
-        `✅ Подписка сохранена!\nТип места: ${state.carType}\n` +
-        `Дата: ${state.departureDate}\n` +
-        `Отправление: ${state.origin}\n` +
-        `Максимальная цена: ${state.maxPrice} руб.`
-      );
-    } catch (err) {
-      console.error(err);
-      await ctx.reply('❌ Ошибка при сохранении подписки. Попробуйте позже.');
-    }
-
-    ctx.scene.leave();
-  });
+  if (ctx.session.stepIndex >= steps.length) return showSummary(ctx);
+  return ask(ctx);
 });
 
-function isValidPrice(input: string): boolean {
-  const price = Number(input.trim());
-  return !isNaN(price) && price > 0;
-}
-
-function isValidDate(input: string): boolean {
-  const regex = /^\d{4}-\d{2}-\d{2}$/;
-  if (!regex.test(input)) return false;
-
-  const [year, month, day] = input.split('-').map(Number);
-  const date = new Date(input);
-
-  if (
-    Number.isNaN(date.getTime()) ||
-    date.getUTCFullYear() !== year ||
-    date.getUTCMonth() + 1 !== month ||
-    date.getUTCDate() !== day
-  ) {
-    return false;
-  }
-
-  return true;
-}
-
-async function fetchStationSuggestions(query: string) {
-  const url = new URL('https://ticket.rzd.ru/api/v1/suggests');
-  url.searchParams.set('Query', query);
-  url.searchParams.set(
-    'TransportType',
-    'bus,avia,rail,aeroexpress,suburban,boat'
-  );
-  url.searchParams.set('GroupResults', 'true');
-  url.searchParams.set('RailwaySortPriority', 'true');
-  url.searchParams.set('SynonymOn', '1');
-  url.searchParams.set('Language', 'ru');
-
-  const res = await fetch(url.toString(), {
-    headers: { 'User-Agent': 'Mozilla/5.0' },
+// Функция для отправки пользователю меню выбора станций
+async function sendStationSelection(ctx: SubscriptionWizardContext) {
+  const buttons = ctx.session.stationOptions!.map((s) => {
+    const selected = ctx.session.selectedStations!.some(sel => sel.expressCode === s.expressCode);
+    return Markup.button.callback(`${selected ? "✅ " : ""}${s.name}`, `station_toggle_${s.expressCode}`);
   });
+  buttons.unshift(Markup.button.callback("🌆 Все станции города", "station_all"));
+  buttons.push(Markup.button.callback("✅ Готово", "station_done"));
 
-  if (!res.ok) throw new Error('Ошибка запроса к API РЖД');
-
-  const data = await res.json();
-
-  const stations: { name: string; expressCode: string }[] = [];
-
-  for (const group of ['train', 'avia', 'bus', 'suburban']) {
-    if (data[group]) {
-      for (const item of data[group]) {
-        stations.push({
-          name: item.name,
-          expressCode: item.expressCode,
-        });
-      }
-    }
+  // Удаляем предыдущее сообщение со списком, если есть
+  if (ctx.session.lastStationMessageId) {
+    try {
+      await ctx.deleteMessage(ctx.session.lastStationMessageId);
+    } catch {}
   }
 
-  return stations;
+  const msg = await ctx.reply(
+    "Выберите станции (можно несколько):",
+    Markup.inlineKeyboard(buttons, { columns: 1 })
+  );
+
+  ctx.session.lastStationMessageId = msg.message_id;
+}
+
+// Регистрация обработчика на выбор станции из предложенного списка
+createSubscriptionScene.action(/station_toggle_(.+)/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const code = ctx.match![1];
+  const station = ctx.session.stationOptions!.find(s => s.expressCode === code);
+  if (!station) return;
+  const selected = ctx.session.selectedStations!;
+  const idx = selected.findIndex(s => s.expressCode === code);
+  if (idx >= 0) selected.splice(idx, 1);
+  else selected.push(station);
+  return sendStationSelection(ctx);
+});
+
+// Регистрация обработчика на выбор всех доступных станций (если пользователю вообще пофиг с какой станции ехать)
+createSubscriptionScene.action("station_all", async (ctx) => {
+  await ctx.answerCbQuery();
+  ctx.session.selectedStations = [...ctx.session.stationOptions!];
+  return sendStationSelection(ctx);
+});
+
+// Регистрация обработчика на завершение выбора станций
+createSubscriptionScene.action("station_done", async (ctx) => {
+  await ctx.answerCbQuery();
+  const which = ctx.session.selectingStationFor!;
+  ctx.session.data[which] = ctx.session.selectedStations!;
+  ctx.session.selectingStationFor = null;
+  ctx.session.stationOptions = [];
+  ctx.session.selectedStations = [];
+  ctx.session.lastStationMessageId = undefined;
+  ctx.session.stepIndex++;
+  if (ctx.session.inEditing) {
+    ctx.session.inEditing = false;
+    ctx.session.stepIndex = steps.length;
+  }
+  await ctx.reply(`✅ Выбрано: ${ctx.session.data[which]!.map(s => s.name).join(", ")}`);
+  if (ctx.session.stepIndex >= steps.length) return showSummary(ctx);
+  return ask(ctx);
+});
+
+// Регистрация обработчиков на выбор тип места
+seatTypes.forEach((type) =>
+  createSubscriptionScene.action(`seat_${type}`, async (ctx) => {
+    await ctx.answerCbQuery();
+    ctx.session.data.carType = type;
+    ctx.session.stepIndex++;
+    return showSummary(ctx);
+  })
+);
+
+// Регистрация обработчиков на редактирование парметров подписки
+steps.forEach((s, idx) =>
+  createSubscriptionScene.action(`edit_${s.key}`, async (ctx) => {
+    console.log("editing index: ", idx);
+    await ctx.answerCbQuery();
+    ctx.session.inEditing = true;
+    ctx.session.stepIndex = idx;
+    await sendWithKeyboard(ctx, `✏️ Измените значение поля: ${s.label}\n${s.message}`);
+  })
+);
+
+// Сохранение подписки
+createSubscriptionScene.action("save_subscription", async (ctx) => {
+  await ctx.answerCbQuery();
+  const d = ctx.session.data;
+  try {
+    await Subscription.upsert({
+      telegramId: String(ctx.from?.id),
+      filter: {
+        departureDate: d.departureDate!,
+        origin: d.origin!,
+        destination: d.destination!,
+        carType: d.carType!,
+        maxPrice: d.maxPrice!,
+      },
+    });
+    await ctx.reply(
+      `✅ Подписка сохранена!\n` +
+      `Тип места: ${seatTypeNameByType[d.carType!]}\n` +
+      `Дата: ${d.departureDate}\n` +
+      `Отправление: ${d.origin!.map(s => s.name).join(", ")}\n` +
+      `Назначение: ${d.destination!.map(s => s.name).join(", ")}\n` +
+      `Макс. цена: ${d.maxPrice} руб.`,
+      Markup.removeKeyboard()
+    );
+  } catch (err) {
+    console.error(err);
+    await ctx.reply("❌ Ошибка при сохранении подписки. Попробуйте позже.");
+  }
+  ctx.scene.leave();
+});
+
+// Отправка сообщения пользователю с кнопками "Назад" и "Отмена". Кнопки нужно отправлять с каждым сообщением,
+// иначе они просто не будут отображаться в интерфейсе
+async function sendWithKeyboard(ctx: SubscriptionWizardContext, message: string) {
+  await ctx.reply(
+    message,
+    Markup.keyboard([["⬅️ Назад"], ["❌ Отмена"]]).resize()
+  );
+}
+
+// Запрос следующего параметра у пользователя
+async function ask(ctx: SubscriptionWizardContext) {
+  const step = steps[ctx.session.stepIndex];
+  await sendWithKeyboard(ctx, step.message);
+}
+
+// Отображение введенных данных
+async function showSummary(ctx: SubscriptionWizardContext) {
+  const d = ctx.session.data;
+  const summary = [
+    `📋 <b>Проверьте данные перед сохранением:</b>`,
+    `🗓 <b>Дата:</b> ${d.departureDate}`,
+    `🚉 <b>Отправление:</b> ${d.origin!.map(s => s.name).join(", ")}`,
+    `🎯 <b>Назначение:</b> ${d.destination!.map(s => s.name).join(", ")}`,
+    `💰 <b>Макс. цена:</b> ${d.maxPrice} руб.`,
+    `💺 <b>Тип места:</b> ${seatTypeNameByType[d.carType!]}`,
+  ].join("\n");
+
+  const editBtns = steps.map((s) => [
+    Markup.button.callback(`✏️ Изменить ${s.label}`, `edit_${s.key}`),
+  ]);
+  editBtns.push([Markup.button.callback("✅ Сохранить подписку", "save_subscription")]);
+
+  await ctx.replyWithHTML(summary, Markup.inlineKeyboard(editBtns));
 }

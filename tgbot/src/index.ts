@@ -52,7 +52,9 @@ bot.command("unsubscribe", ctx => {
 
 const stage = new Scenes.Stage<Scenes.WizardContext>([createSubscriptionScene]);
 
+// Добавляем в контекст информацию о сессии
 bot.use(session());
+// Добавляем в бота сцены
 bot.use(stage.middleware());
 
 bot.command("subscribe", async (ctx) => {
