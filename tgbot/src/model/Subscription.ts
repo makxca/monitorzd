@@ -1,22 +1,17 @@
 import { DataTypes, Model } from 'sequelize';
 import { sequelize } from './sequelize';
 
-interface Station {
-  expressCode: string;  // код станции
-  nodeId: string;       // id станции для построения URL
-}
-
-interface Filter {
-  departureDate: string;       // "2025-12-30T00:00:00"
-  origin: Station[];           // массив выбранных станций отправления
-  destination: Station[];      // массив выбранных станций назначения
-  carType: "plaz" | "coop" | "SV" | "sitting" | null;
-  maxPrice: number;            // число в рублях
-}
-
 interface SubscriptionAttributes {
   telegramId: string;
-  filter: Filter;
+  filters: {
+    "departureDate": string // "2025-12-30T00:00:00",
+    "origin": string // "2000000",
+    "originNodeId": string // "5a323c29340c7441a0a556bb", используется для построения URL страницы поиска
+    "destination": string // "2004000",
+    "destinationNodeId": string // "5a3244bc340c7441a0a556ca", используется для построения URL страницы поиска
+    "carType": "plaz" | "coop" | "SV" | "sitting" | null,
+    "maxPrice": number // число в рублях
+  }[];
 }
 
 export class Subscription extends Model<SubscriptionAttributes> {}
@@ -28,7 +23,7 @@ Subscription.init(
       allowNull: false,
       unique: true,
     },
-    filter: {
+    filters: {
       type: DataTypes.JSON,
       allowNull: false,
     },

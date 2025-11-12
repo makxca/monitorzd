@@ -3,24 +3,27 @@ import { Subscription } from "../model/Subscription.js";
 import { fetchStationSuggestions, Station } from "../lib/fetchStationSuggestions.js";
 import { isValidDate, isValidPrice } from "../lib/utils.js";
 
+// Отображаемые пользователю имена типов мест
 const seatTypeNameByType = {
-  plaz: 'Плацкарт',
-  coop: 'Купе',
-  SV: 'СВ',
-  sitting: 'Сидячее',
+  plaz: "Плацкарт",
+  coop: "Купе",
+  SV: "СВ",
+  sitting: "Сидячее",
 } as const;
 
 type SeatType = keyof typeof seatTypeNameByType;
 const seatTypes: SeatType[] = ["plaz", "coop", "SV", "sitting"];
 
+// Тип данных, сохраняемых в фильтре подписки
 interface SubscriptionData {
   departureDate?: string;
-  origin?: Station[];
-  destination?: Station[];
+  origin?: Station;
+  destination?: Station;
   maxPrice?: number;
   carType?: SeatType;
 }
 
+// Сессионные данные во время создания подписки
 interface SubscriptionWizardSession extends Scenes.WizardSessionData {
   stepIndex: number;
   inEditing: boolean;
@@ -29,14 +32,15 @@ interface SubscriptionWizardSession extends Scenes.WizardSessionData {
 
   selectingStationFor?: "origin" | "destination" | null;
   stationOptions?: Station[];
-  selectedStations?: Station[];
   lastStationMessageId?: number;
 }
 
+// Расширенный контекст сцены
 interface SubscriptionWizardContext extends Scenes.WizardContext {
   session: SubscriptionWizardSession;
 }
 
+// Описание шагов мастера создания подписки
 interface Step {
   key: keyof SubscriptionData;
   label: string;
@@ -45,6 +49,7 @@ interface Step {
   error: string;
 }
 
+// Список шагов мастера
 const steps: Step[] = [
   {
     key: "departureDate",
@@ -80,6 +85,7 @@ const steps: Step[] = [
   },
 ];
 
+// Создаем сцену мастера подписки
 export const createSubscriptionScene = new Scenes.BaseScene<SubscriptionWizardContext>(
   "create-subscription"
 );
@@ -91,7 +97,6 @@ createSubscriptionScene.enter(async (ctx) => {
   ctx.session.data = {};
   ctx.session.selectingStationFor = null;
   ctx.session.stationOptions = [];
-  ctx.session.selectedStations = [];
   ctx.session.lastStationMessageId = undefined;
   await sendWithKeyboard(ctx, "🚆 Начинаем создание подписки!");
   await ask(ctx);
@@ -109,40 +114,40 @@ createSubscriptionScene.hears(["⬅️ Назад", "назад", "back"], async
   if (ctx.session.selectingStationFor) {
     ctx.session.selectingStationFor = null;
     ctx.session.stationOptions = [];
-    ctx.session.selectedStations = [];
+    if (ctx.session.lastStationMessageId) {
+      try {
+        await ctx.deleteMessage(ctx.session.lastStationMessageId);
+      } catch {}
+    }
     return showSummary(ctx);
   }
   ctx.session.stepIndex = Math.max(0, ctx.session.stepIndex - 1);
   await ask(ctx);
 });
 
-// Основной обработчик пользовательского ввода. Сюда попадает все, что пользователь вводит текстом (кроме ❌ Отмена и ⬅️ Назад,
-// на эти действия есть отдельные обработчики)
+// Основной обработчик пользовательского ввода. 
+// Сюда попадает всё, что пользователь вводит текстом (кроме ❌ Отмена и ⬅️ Назад)
 createSubscriptionScene.on("text", async (ctx) => {
   if (ctx.session.stepIndex >= steps.length) return showSummary(ctx);
 
   const text = ctx.message.text.trim();
   const step = steps[ctx.session.stepIndex];
 
-  // Станции обрабатываем отдельно, так как тут не совсем тривиальная логика с запросом списка из API РЖД и
-  // предоставлением пользователю множественного выбора
+  // Для шагов выбора станций обрабатываем отдельно — идёт запрос к API РЖД
   if (step.key === "origin" || step.key === "destination") {
     try {
       const stations = await fetchStationSuggestions(text).catch(() => []);
       if (!stations.length) return sendWithKeyboard(ctx, step.error);
 
       ctx.session.stationOptions = stations;
-      ctx.session.selectedStations = [];
       ctx.session.selectingStationFor = step.key;
-
       return sendStationSelection(ctx);
     } catch {
       return sendWithKeyboard(ctx, step.error);
     }
-  } 
+  }
 
-  // Остальные шаги по стандартному флоу: валидируем пользовательский ввод, инкрементим stepIndex, 
-  // переходим к следующему шагу
+  // Для остальных шагов просто валидируем текстовый ввод
   const result = await step.validate?.(text);
   if (!result) {
     await sendWithKeyboard(ctx, step.error);
@@ -151,18 +156,21 @@ createSubscriptionScene.on("text", async (ctx) => {
 
   ctx.session.data[step.key] = result;
 
+  // Если мы редактировали конкретное поле — выходим обратно к обзору
   if (ctx.session.inEditing) {
-    ctx.session.stepIndex = steps.length;
     ctx.session.inEditing = false;
     return showSummary(ctx);
   }
 
+  // Иначе идём дальше по шагам мастера
   ctx.session.stepIndex++;
-  if(steps[ctx.session.stepIndex].key === "carType") {
+  if (steps[ctx.session.stepIndex]?.key === "carType") {
     return ctx.reply(
       "Выберите тип места:",
       Markup.inlineKeyboard(
-        seatTypes.map((t) => Markup.button.callback(seatTypeNameByType[t], `seat_${t}`)),
+        seatTypes.map((t) =>
+          Markup.button.callback(seatTypeNameByType[t], `seat_${t}`)
+        ),
         { columns: 2 }
       )
     );
@@ -172,16 +180,13 @@ createSubscriptionScene.on("text", async (ctx) => {
   return ask(ctx);
 });
 
-// Функция для отправки пользователю меню выбора станций
+// Функция отправки пользователю меню выбора станций
 async function sendStationSelection(ctx: SubscriptionWizardContext) {
-  const buttons = ctx.session.stationOptions!.map((s) => {
-    const selected = ctx.session.selectedStations!.some(sel => sel.expressCode === s.expressCode);
-    return Markup.button.callback(`${selected ? "✅ " : ""}${s.name}`, `station_toggle_${s.expressCode}`);
-  });
-  buttons.unshift(Markup.button.callback("🌆 Все станции города", "station_all"));
-  buttons.push(Markup.button.callback("✅ Готово", "station_done"));
+  const buttons = ctx.session.stationOptions!.map((s) =>
+    Markup.button.callback(s.name, `station_select_${s.expressCode}`)
+  );
 
-  // Удаляем предыдущее сообщение со списком, если есть
+  // Удаляем предыдущее сообщение со списком, чтобы не засорять чат
   if (ctx.session.lastStationMessageId) {
     try {
       await ctx.deleteMessage(ctx.session.lastStationMessageId);
@@ -189,66 +194,54 @@ async function sendStationSelection(ctx: SubscriptionWizardContext) {
   }
 
   const msg = await ctx.reply(
-    "Выберите станции (можно несколько):",
+    "Выберите станцию из списка:",
     Markup.inlineKeyboard(buttons, { columns: 1 })
   );
 
   ctx.session.lastStationMessageId = msg.message_id;
 }
 
-// Регистрация обработчика на выбор станции из предложенного списка
-createSubscriptionScene.action(/station_toggle_(.+)/, async (ctx) => {
+// Обработчик выбора станции пользователем
+createSubscriptionScene.action(/station_select_(.+)/, async (ctx) => {
   await ctx.answerCbQuery();
   const code = ctx.match![1];
-  const station = ctx.session.stationOptions!.find(s => s.expressCode === code);
-  if (!station) return;
-  const selected = ctx.session.selectedStations!;
-  const idx = selected.findIndex(s => s.expressCode === code);
-  if (idx >= 0) selected.splice(idx, 1);
-  else selected.push(station);
-  return sendStationSelection(ctx);
-});
-
-// Регистрация обработчика на выбор всех доступных станций (если пользователю вообще пофиг с какой станции ехать)
-createSubscriptionScene.action("station_all", async (ctx) => {
-  await ctx.answerCbQuery();
-  ctx.session.selectedStations = [...ctx.session.stationOptions!];
-  return sendStationSelection(ctx);
-});
-
-// Регистрация обработчика на завершение выбора станций
-createSubscriptionScene.action("station_done", async (ctx) => {
-  await ctx.answerCbQuery();
   const which = ctx.session.selectingStationFor!;
-  ctx.session.data[which] = ctx.session.selectedStations!;
+  const station = ctx.session.stationOptions!.find((s) => s.expressCode === code);
+  if (!station) return;
+
+  ctx.session.data[which] = station;
   ctx.session.selectingStationFor = null;
-  ctx.session.stationOptions = [];
-  ctx.session.selectedStations = [];
-  ctx.session.lastStationMessageId = undefined;
+
+  if (ctx.session.lastStationMessageId) {
+    try {
+      await ctx.deleteMessage(ctx.session.lastStationMessageId);
+    } catch {}
+  }
+
+  await ctx.reply(`✅ Выбрана станция: ${station.name}`);
+
   ctx.session.stepIndex++;
   if (ctx.session.inEditing) {
     ctx.session.inEditing = false;
     ctx.session.stepIndex = steps.length;
   }
-  await ctx.reply(`✅ Выбрано: ${ctx.session.data[which]!.map(s => s.name).join(", ")}`);
+
   if (ctx.session.stepIndex >= steps.length) return showSummary(ctx);
   return ask(ctx);
 });
 
-// Регистрация обработчиков на выбор тип места
+// Обработчики выбора типа места
 seatTypes.forEach((type) =>
   createSubscriptionScene.action(`seat_${type}`, async (ctx) => {
     await ctx.answerCbQuery();
     ctx.session.data.carType = type;
-    ctx.session.stepIndex++;
     return showSummary(ctx);
   })
 );
 
-// Регистрация обработчиков на редактирование парметров подписки
+// Обработчики редактирования полей (кнопки ✏️)
 steps.forEach((s, idx) =>
   createSubscriptionScene.action(`edit_${s.key}`, async (ctx) => {
-    console.log("editing index: ", idx);
     await ctx.answerCbQuery();
     ctx.session.inEditing = true;
     ctx.session.stepIndex = idx;
@@ -256,28 +249,30 @@ steps.forEach((s, idx) =>
   })
 );
 
-// Сохранение подписки
+// Сохранение подписки в базу
 createSubscriptionScene.action("save_subscription", async (ctx) => {
   await ctx.answerCbQuery();
   const d = ctx.session.data;
   try {
     await Subscription.upsert({
       telegramId: String(ctx.from?.id),
-      filter: {
+      filters: [{
         departureDate: d.departureDate!,
-        origin: d.origin!,
-        destination: d.destination!,
+        origin: d.origin?.expressCode!,
+        originNodeId: d.origin?.nodeId!,
+        destination: d.destination?.expressCode!,
+        destinationNodeId: d.destination?.nodeId!,
         carType: d.carType!,
         maxPrice: d.maxPrice!,
-      },
+      }],
     });
     await ctx.reply(
       `✅ Подписка сохранена!\n` +
-      `Тип места: ${seatTypeNameByType[d.carType!]}\n` +
-      `Дата: ${d.departureDate}\n` +
-      `Отправление: ${d.origin!.map(s => s.name).join(", ")}\n` +
-      `Назначение: ${d.destination!.map(s => s.name).join(", ")}\n` +
-      `Макс. цена: ${d.maxPrice} руб.`,
+        `Тип места: ${seatTypeNameByType[d.carType!]}\n` +
+        `Дата: ${d.departureDate}\n` +
+        `Отправление: ${d.origin!.name}\n` +
+        `Назначение: ${d.destination!.name}\n` +
+        `Макс. цена: ${d.maxPrice} руб.`,
       Markup.removeKeyboard()
     );
   } catch (err) {
@@ -287,13 +282,9 @@ createSubscriptionScene.action("save_subscription", async (ctx) => {
   ctx.scene.leave();
 });
 
-// Отправка сообщения пользователю с кнопками "Назад" и "Отмена". Кнопки нужно отправлять с каждым сообщением,
-// иначе они просто не будут отображаться в интерфейсе
+// Отправка пользователю сообщения с клавиатурой "Назад" / "Отмена"
 async function sendWithKeyboard(ctx: SubscriptionWizardContext, message: string) {
-  await ctx.reply(
-    message,
-    Markup.keyboard([["⬅️ Назад"], ["❌ Отмена"]]).resize()
-  );
+  await ctx.reply(message, Markup.keyboard([["⬅️ Назад"], ["❌ Отмена"]]).resize());
 }
 
 // Запрос следующего параметра у пользователя
@@ -302,14 +293,14 @@ async function ask(ctx: SubscriptionWizardContext) {
   await sendWithKeyboard(ctx, step.message);
 }
 
-// Отображение введенных данных
+// Отображение введённых пользователем данных перед сохранением
 async function showSummary(ctx: SubscriptionWizardContext) {
   const d = ctx.session.data;
   const summary = [
     `📋 <b>Проверьте данные перед сохранением:</b>`,
     `🗓 <b>Дата:</b> ${d.departureDate}`,
-    `🚉 <b>Отправление:</b> ${d.origin!.map(s => s.name).join(", ")}`,
-    `🎯 <b>Назначение:</b> ${d.destination!.map(s => s.name).join(", ")}`,
+    `🚉 <b>Отправление:</b> ${d.origin?.name}`,
+    `🎯 <b>Назначение:</b> ${d.destination?.name}`,
     `💰 <b>Макс. цена:</b> ${d.maxPrice} руб.`,
     `💺 <b>Тип места:</b> ${seatTypeNameByType[d.carType!]}`,
   ].join("\n");

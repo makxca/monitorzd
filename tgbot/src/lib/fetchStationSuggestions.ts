@@ -23,15 +23,16 @@ export async function fetchStationSuggestions(query: string): Promise<Station[]>
 
   const stations: Station[] = [];
 
-  for (const group of ['train', 'avia', 'bus', 'suburban']) {
-    if (data[group]) {
-      for (const item of data[group]) {
+  if (data['city']) {
+    for (const item of data['city']) {
+        if (!item.expressCode) {
+            continue;
+        }
         stations.push({
-          name: item.name,
-          expressCode: item.expressCode,
-          nodeId: item.nodeId,
+            name: item.name,
+            expressCode: item.expressCode,
+            nodeId: item.nodeId,
         })
-      }
     }
   }
 

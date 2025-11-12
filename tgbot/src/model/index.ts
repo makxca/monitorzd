@@ -11,13 +11,15 @@ import { Subscription} from './Subscription';
   if (isDev) {
     await Subscription.create({
       telegramId: "123456789",
-      filter: {
+      filters: [{
         departureDate: "2025-12-30T00:00:00",
-        origin: [{expressCode: "2020202", nodeId: "4hg5b3h4vhlv34h5v4hv"}],
-        destination: [{expressCode: "2020202", nodeId: "4hg5b3h4vhlv34h5v4hv"}],
+        origin: "2020202",
+        originNodeId: "4hg5b3h4vhlv34h5v4hv",
+        destination: "2020202",
+        destinationNodeId: "4hg5b3h4vhlv34h5v4hv",
         carType: "plaz",
         maxPrice: 12345
-      }
+      }]
     });
   }
 
