@@ -27,11 +27,11 @@ Subscription.init(
       type: DataTypes.JSON,
       allowNull: false,
     },
-    // created_at, updated_at, deleted_at are created automatically
+    // created_at, updated_at, deleted_at добавляются автоматически
   },
   {
     sequelize,
     modelName: 'Subscription',
     paranoid: true,
-  },
+  }
 );

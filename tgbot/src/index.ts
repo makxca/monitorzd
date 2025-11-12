@@ -3,7 +3,8 @@ dotenv.config({
   path: '.env'
 })
 
-import { Telegraf } from "telegraf"
+import { Telegraf, Scenes, session } from "telegraf"
+import { createSubscriptionScene } from "./commands/subscribe"
 import { findByFilters } from "./findTrains"
 import fs from "node:fs"
 import { sequelize, Subscription } from './model'
@@ -11,7 +12,7 @@ sequelize.sync();
 
 import { helpCommand, startCommand, whoisthisCommand } from "./commands"
 
-const bot = new Telegraf(process.env.BOT_TOKEN!)
+const bot = new Telegraf<Scenes.WizardContext>(process.env.BOT_TOKEN!)
 
 const ids: number[] = []; // TODO: получать из БД
 
@@ -38,15 +39,18 @@ bot.command("unsubscribe", ctx => {
   fs.writeFileSync("./src/ids.json", JSON.stringify(ids))
   ctx.reply("Вы успешно отписались от рассылки")
 })
-bot.command("subscribe", ctx => {
-  if (ids.includes(ctx.from.id)) {
-    ctx.reply("Вы уже подписаны на рассылку")
-    return
-  }
-  ids.push(ctx.from.id)
-  fs.writeFileSync("./src/ids.json", JSON.stringify(ids))
-  ctx.reply("Вы успешно подписались на рассылку")
-})
+
+const stage = new Scenes.Stage<Scenes.WizardContext>([createSubscriptionScene]);
+
+// Добавляем в контекст информацию о сессии
+bot.use(session());
+// Добавляем в бота сцены
+bot.use(stage.middleware());
+
+bot.command("subscribe", async (ctx) => {
+  console.log("/subscribe");
+  ctx.scene.enter("create-subscription")
+});
 
 bot.launch()
 console.log("\n\nBot successfully started")
