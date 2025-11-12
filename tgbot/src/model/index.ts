@@ -18,7 +18,9 @@ import { Subscription} from './Subscription';
         destination: "2020202",
         destinationNodeId: "4hg5b3h4vhlv34h5v4hv",
         carType: "plaz",
-        maxPrice: 12345
+        maxPrice: 92345,
+        originNodeId: "5a323c29340c7441a0a556bb",
+        destinationNodeId: "5a3244bc340c7441a0a556ca",
       }]
     });
   }
