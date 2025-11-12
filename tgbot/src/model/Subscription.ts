@@ -7,8 +7,10 @@ interface SubscriptionAttributes {
     "departureDate": string // "2025-12-30T00:00:00",
     "origin": string // "2000000",
     "originNodeId": string // "5a323c29340c7441a0a556bb", используется для построения URL страницы поиска
+    "originName": string,
     "destination": string // "2004000",
     "destinationNodeId": string // "5a3244bc340c7441a0a556ca", используется для построения URL страницы поиска
+    "destinationName": string,
     "carType": "plaz" | "coop" | "SV" | "sitting" | null,
     "maxPrice": number // число в рублях
   }[];
@@ -21,7 +23,6 @@ Subscription.init(
     telegramId: {
       type: DataTypes.TEXT,
       allowNull: false,
-      unique: true,
     },
     filters: {
       type: DataTypes.JSON,

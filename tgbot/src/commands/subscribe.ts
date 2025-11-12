@@ -2,14 +2,7 @@ import { Scenes, Markup } from "telegraf";
 import { Subscription } from "../model/Subscription.js";
 import { fetchStationSuggestions, Station } from "../lib/fetchStationSuggestions.js";
 import { isValidDate, isValidPrice } from "../lib/utils.js";
-
-// Отображаемые пользователю имена типов мест
-const seatTypeNameByType = {
-  plaz: "Плацкарт",
-  coop: "Купе",
-  SV: "СВ",
-  sitting: "Сидячее",
-} as const;
+import { seatTypeNameByType } from "../lib/const.js";
 
 type SeatType = keyof typeof seatTypeNameByType;
 const seatTypes: SeatType[] = ["plaz", "coop", "SV", "sitting"];
@@ -146,6 +139,9 @@ createSubscriptionScene.on("text", async (ctx) => {
       return sendWithKeyboard(ctx, step.error);
     }
   }
+  if (step.key == "carType") {
+    return sendSeatTypeSelection(ctx);
+  }
 
   // Для остальных шагов просто валидируем текстовый ввод
   const result = await step.validate?.(text);
@@ -162,18 +158,9 @@ createSubscriptionScene.on("text", async (ctx) => {
     return showSummary(ctx);
   }
 
-  // Иначе идём дальше по шагам мастера
   ctx.session.stepIndex++;
   if (steps[ctx.session.stepIndex]?.key === "carType") {
-    return ctx.reply(
-      "Выберите тип места:",
-      Markup.inlineKeyboard(
-        seatTypes.map((t) =>
-          Markup.button.callback(seatTypeNameByType[t], `seat_${t}`)
-        ),
-        { columns: 2 }
-      )
-    );
+    return sendSeatTypeSelection(ctx);
   }
 
   if (ctx.session.stepIndex >= steps.length) return showSummary(ctx);
@@ -235,9 +222,22 @@ seatTypes.forEach((type) =>
   createSubscriptionScene.action(`seat_${type}`, async (ctx) => {
     await ctx.answerCbQuery();
     ctx.session.data.carType = type;
+    ctx.session.stepIndex++;
     return showSummary(ctx);
   })
 );
+
+async function sendSeatTypeSelection(ctx: SubscriptionWizardContext) {
+  return ctx.reply(
+      "Выберите тип места:",
+      Markup.inlineKeyboard(
+        seatTypes.map((t) =>
+          Markup.button.callback(seatTypeNameByType[t], `seat_${t}`)
+        ),
+        { columns: 2 }
+      )
+  );
+}
 
 // Обработчики редактирования полей (кнопки ✏️)
 steps.forEach((s, idx) =>
@@ -260,8 +260,10 @@ createSubscriptionScene.action("save_subscription", async (ctx) => {
         departureDate: d.departureDate!,
         origin: d.origin?.expressCode!,
         originNodeId: d.origin?.nodeId!,
+        originName: d.origin?.name!,
         destination: d.destination?.expressCode!,
         destinationNodeId: d.destination?.nodeId!,
+        destinationName: d.destination?.name!,
         carType: d.carType!,
         maxPrice: d.maxPrice!,
       }],
