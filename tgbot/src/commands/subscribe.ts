@@ -133,6 +133,23 @@ createSubscriptionScene.on("text", async (ctx) => {
       const stations = await fetchStationSuggestions(text).catch(() => []);
       if (!stations.length) return sendWithKeyboard(ctx, step.error);
 
+      // если найдена ровно одна станция — выбираем её сразу
+      if (stations.length === 1) {
+        const station = stations[0];
+        ctx.session.data[step.key] = station;
+        await ctx.reply(`✅ Выбрана станция: ${station.name}`);
+
+        ctx.session.stepIndex++;
+        if (ctx.session.inEditing) {
+          ctx.session.inEditing = false;
+          ctx.session.stepIndex = steps.length;
+        }
+
+        if (ctx.session.stepIndex >= steps.length) return showSummary(ctx);
+        return ask(ctx);
+      }
+
+      // иначе показываем меню выбора
       ctx.session.stationOptions = stations;
       ctx.session.selectingStationFor = step.key;
       return sendStationSelection(ctx);
@@ -140,6 +157,7 @@ createSubscriptionScene.on("text", async (ctx) => {
       return sendWithKeyboard(ctx, step.error);
     }
   }
+
   if (step.key == "carType") {
     return sendSeatTypeSelection(ctx);
   }
