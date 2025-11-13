@@ -1,5 +1,5 @@
 import { TelegrafFn } from "../types";
 
 export const helpCommand: TelegrafFn = (ctx) => {
-  ctx.reply('/check, /subscribe')
+  ctx.reply('/subscribe, /manage_subscriptions')
 }
