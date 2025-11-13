@@ -6,41 +6,30 @@ dotenv.config({
 import { Telegraf, Scenes, session } from "telegraf"
 import { createSubscriptionScene } from "./commands/subscribe"
 import { findByFilters } from "./findTrains"
-import fs from "node:fs"
 import { sequelize, Subscription } from './model'
 sequelize.sync();
 
 import { helpCommand, startCommand, whoisthisCommand } from "./commands"
+import { manageSubscriptionsScene } from "./commands/manageSubscriptions"
 
 const bot = new Telegraf<Scenes.WizardContext>(process.env.BOT_TOKEN!)
-
-const ids: number[] = []; // TODO: получать из БД
 
 bot.telegram.setMyCommands([
   {
     command: "subscribe",
-    description: "Подписаться на рассылку. Проверки проводятся каждые 10 минут"
+    description: "Подписаться на рассылку. Проверки проводятся каждые 5 минут"
   },
   {
-    command: "unsubscribe",
-    description: "Отписаться от рассылки"
+    command: "manage_subscriptions",
+    description: "Просмотр активных подписок"
   }
 ])
 
 bot.start(startCommand)
 bot.help(helpCommand)
 bot.command("whoisthis", whoisthisCommand)
-bot.command("unsubscribe", ctx => {
-  if (!ids.includes(ctx.from.id)) {
-    ctx.reply("Вы не подписаны на рассылку")
-    return
-  }
-  ids.splice(ids.find(id => id !== ctx.from.id)!)
-  fs.writeFileSync("./src/ids.json", JSON.stringify(ids))
-  ctx.reply("Вы успешно отписались от рассылки")
-})
 
-const stage = new Scenes.Stage<Scenes.WizardContext>([createSubscriptionScene]);
+const stage = new Scenes.Stage<Scenes.WizardContext>([createSubscriptionScene, manageSubscriptionsScene]);
 
 // Добавляем в контекст информацию о сессии
 bot.use(session());
@@ -49,8 +38,12 @@ bot.use(stage.middleware());
 
 bot.command("subscribe", async (ctx) => {
   console.log("/subscribe");
-  ctx.scene.enter("create-subscription")
+  ctx.scene.enter("create-subscription");
 });
+
+bot.command("manage_subscriptions", ctx => {
+  ctx.scene.enter("manage-subscriptions");
+})
 
 bot.launch()
 console.log("\n\nBot successfully started")
@@ -66,8 +59,8 @@ async function monitoring() {
   }
   
 
-  // не раз в 10m, а раз в 10m±50s
-  setTimeout(monitoring, 10 * 60 * 1000 + (Math.random() - 0.5) * 100000)
+  // не раз в 10m, а раз в 5m±50s
+  setTimeout(monitoring, 5 * 60 * 1000 + (Math.random() - 0.5) * 100000)
 }
 
 setTimeout(monitoring, 2000)
