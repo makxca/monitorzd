@@ -3,6 +3,7 @@ import { Subscription } from "../model/Subscription.js";
 import { fetchStationSuggestions, Station } from "../lib/fetchStationSuggestions.js";
 import { isValidDate, isValidPrice } from "../lib/utils.js";
 import { seatTypeNameByType } from "../lib/const.js";
+import { findTrains } from "../findTrains.js";
 
 type SeatType = keyof typeof seatTypeNameByType;
 const seatTypes: SeatType[] = ["plaz", "coop", "SV", "sitting"];
@@ -30,7 +31,7 @@ interface SubscriptionWizardSession extends Scenes.WizardSessionData {
 
 // Расширенный контекст сцены
 interface SubscriptionWizardContext extends Scenes.WizardContext {
-  session: SubscriptionWizardSession;
+  session: SubscriptionWizardSession & Scenes.WizardSession;
 }
 
 // Описание шагов мастера создания подписки
@@ -254,20 +255,23 @@ createSubscriptionScene.action("save_subscription", async (ctx) => {
   await ctx.answerCbQuery();
   const d = ctx.session.data;
   try {
+    const filter = {
+      departureDate: d.departureDate!,
+      origin: d.origin?.expressCode!,
+      originNodeId: d.origin?.nodeId!,
+      originName: d.origin?.name!,
+      destination: d.destination?.expressCode!,
+      destinationNodeId: d.destination?.nodeId!,
+      destinationName: d.destination?.name!,
+      carType: d.carType!,
+      maxPrice: d.maxPrice!,
+    };
+
     await Subscription.upsert({
       telegramId: String(ctx.from?.id),
-      filters: [{
-        departureDate: d.departureDate!,
-        origin: d.origin?.expressCode!,
-        originNodeId: d.origin?.nodeId!,
-        originName: d.origin?.name!,
-        destination: d.destination?.expressCode!,
-        destinationNodeId: d.destination?.nodeId!,
-        destinationName: d.destination?.name!,
-        carType: d.carType!,
-        maxPrice: d.maxPrice!,
-      }],
+      filters: [filter],
     });
+
     await ctx.reply(
       `✅ Подписка сохранена!\n` +
         `Тип места: ${seatTypeNameByType[d.carType!]}\n` +
@@ -277,6 +281,19 @@ createSubscriptionScene.action("save_subscription", async (ctx) => {
         `Макс. цена: ${d.maxPrice} руб.`,
       Markup.removeKeyboard()
     );
+
+    // Сразу же проверяем, есть ли билеты под такой фильтр
+    const result = await findTrains(filter);
+    
+    if (result) {
+      await ctx.replyWithMarkdown(
+        `Я нашёл такие билеты:\n\n${result}`
+      );
+    } else {
+      await ctx.reply(
+        "Пока таких билетов нет, но как только они появятся, я пришлю уведомление"
+      );
+    }
   } catch (err) {
     console.error(err);
     await ctx.reply("❌ Ошибка при сохранении подписки. Попробуйте позже.");

@@ -42,7 +42,7 @@ export const findTrains = async (filter: Subscription['dataValues']['filters'][n
 
   const response = await fetch(url)
   if (!response.ok) {
-    console.log(response.status, name)
+    console.log(response.status)
     return
   }
   const { Trains } = await response.json() as Found
@@ -69,7 +69,6 @@ export const findTrains = async (filter: Subscription['dataValues']['filters'][n
   if (filtered.length === 0) {
     return
   }
-  console.log(filtered)
   return `
 ${filtered[0].OriginName} - ${filtered[0].DestinationName}:
 
