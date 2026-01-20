@@ -15,6 +15,7 @@ interface SubscriptionData {
   destination?: Station;
   maxPrice?: number;
   carType?: SeatType;
+  onlyLowerPlace?: boolean;
 }
 
 // Сессионные данные во время создания подписки
@@ -88,7 +89,7 @@ export const createSubscriptionScene = new Scenes.BaseScene<SubscriptionWizardCo
 createSubscriptionScene.enter(async (ctx) => {
   ctx.session.stepIndex = 0;
   ctx.session.inEditing = false;
-  ctx.session.data = {};
+  ctx.session.data = { onlyLowerPlace: false };
   ctx.session.selectingStationFor = null;
   ctx.session.stationOptions = [];
   ctx.session.lastStationMessageId = undefined;
@@ -268,6 +269,13 @@ steps.forEach((s, idx) =>
   })
 );
 
+// Обработчик переключения "Только нижнее место"
+createSubscriptionScene.action("toggle_only_lower_place", async (ctx) => {
+  await ctx.answerCbQuery();
+  ctx.session.data.onlyLowerPlace = !ctx.session.data.onlyLowerPlace;
+  return showSummary(ctx);
+});
+
 // Сохранение подписки в базу
 createSubscriptionScene.action("save_subscription", async (ctx) => {
   await ctx.answerCbQuery();
@@ -283,6 +291,7 @@ createSubscriptionScene.action("save_subscription", async (ctx) => {
       destinationName: d.destination?.name!,
       carType: d.carType!,
       maxPrice: d.maxPrice!,
+      onlyLowerPlace: d.onlyLowerPlace ?? false,
     };
 
     await Subscription.upsert({
@@ -345,6 +354,13 @@ async function showSummary(ctx: SubscriptionWizardContext) {
   const editBtns = steps.map((s) => [
     Markup.button.callback(`✏️ Изменить ${s.label}`, `edit_${s.key}`),
   ]);
+  
+  // Добавляем кнопку переключения "Только нижнее место"
+  const lowerPlaceText = d.onlyLowerPlace
+    ? "✅ Только нижнее место (не боковое)"
+    : "Только нижнее место (не боковое)";
+  editBtns.push([Markup.button.callback(lowerPlaceText, "toggle_only_lower_place")]);
+  
   editBtns.push([Markup.button.callback("✅ Сохранить подписку", "save_subscription")]);
 
   await ctx.replyWithHTML(summary, Markup.inlineKeyboard(editBtns));

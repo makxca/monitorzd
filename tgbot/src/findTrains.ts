@@ -28,7 +28,7 @@ const dbCarTypes: Record<Found['Trains'][0]['CarGroups'][0]['CarTypeName'], Subs
 }
 
 export const findTrains = async (filter: Subscription['dataValues']['filters'][number]) => {
-  const { departureDate, destination, origin, carType, maxPrice, originNodeId, destinationNodeId } = filter;
+  const { departureDate, destination, origin, carType, maxPrice, originNodeId, destinationNodeId, onlyLowerPlace } = filter;
 
   const url = new URL('https://ticket.rzd.ru/api/v1/railway-service/prices/train-pricing');
   url.searchParams.set('service_provider', 'B2B_RZD')
@@ -64,7 +64,8 @@ export const findTrains = async (filter: Subscription['dataValues']['filters'][n
       return (
         g.MinPrice <= maxPrice &&
         !g.HasPlacesForDisabledPersons &&
-        (!carType || carType === dbCarTypes[g.CarTypeName])
+        (!carType || carType === dbCarTypes[g.CarTypeName]) && 
+        (!onlyLowerPlace || g.LowerPlaceQuantity > 0)
       );
     }),
     OriginName: t.OriginName,

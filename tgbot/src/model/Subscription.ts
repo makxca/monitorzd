@@ -13,6 +13,7 @@ interface SubscriptionAttributes {
     "destinationName": string,
     "carType": "plaz" | "coop" | "SV" | "sitting" | null,
     "maxPrice": number // число в рублях
+    "onlyLowerPlace": boolean // пользователя интересуют только нижние места (не боковые)
   }[];
 }
 
