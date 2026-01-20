@@ -5,8 +5,12 @@ type Found = {
     CarGroups: {
       CarTypeName: "КУПЕ" | "ПЛАЦ" | "СВ" | "СИД",
       TotalPlaceQuantity: number,
-      MinPrice: number
-      HasPlacesForDisabledPersons: boolean
+      LowerPlaceQuantity: number,
+      LowerSidePlaceQuantity: number,
+      UpperPlaceQuantity: number,
+      UpperSidePlaceQuantity: number,
+      MinPrice: number,
+      HasPlacesForDisabledPersons: boolean,
     }[]
     OriginName: string
     DestinationName: string
@@ -52,6 +56,10 @@ export const findTrains = async (filter: Subscription['dataValues']['filters'][n
       TotalPlaceQuantity: g.TotalPlaceQuantity,
       MinPrice: g.MinPrice,
       HasPlacesForDisabledPersons: g.HasPlacesForDisabledPersons,
+      UpperPlaceQuantity: g.UpperPlaceQuantity,
+      LowerPlaceQuantity: g.LowerPlaceQuantity,
+      UpperSidePlaceQuantity: g.UpperSidePlaceQuantity,
+      LowerSidePlaceQuantity: g.LowerSidePlaceQuantity
     })).filter(g => {
       return (
         g.MinPrice <= maxPrice &&
@@ -75,7 +83,11 @@ ${filtered[0].OriginName} - ${filtered[0].DestinationName}:
 ${filtered.map(t => (
 `${new Date(t.DepartureDateTime).toLocaleString("ru").slice(0, -3)} -
 ${new Date(t.ArrivalDateTime).toLocaleString("ru").slice(0, -3)}
-Мест для выбранного фильтра: ${t.CarGroups.reduce((acc, g) => acc + g.TotalPlaceQuantity, 0)}
+Мест для выбранного фильтра: ${t.CarGroups.reduce((acc, g) => acc + g.TotalPlaceQuantity, 0)}:
+— Верхних мест (купе): ${t.CarGroups.reduce((acc, g) => acc + g.UpperPlaceQuantity, 0)}
+— Нижних мест (купе): ${t.CarGroups.reduce((acc, g) => acc + g.LowerPlaceQuantity, 0)}
+— Верхних мест (боковое): ${t.CarGroups.reduce((acc, g) => acc + g.UpperSidePlaceQuantity, 0)}
+— Нижних мест (боковое): ${t.CarGroups.reduce((acc, g) => acc + g.LowerSidePlaceQuantity, 0)}
 [Ссылка](https://ticket.rzd.ru/searchresults/v/1/${originNodeId}/${destinationNodeId}/${departureDate.slice(0, 10)})`
 ))
 .join('\n\n')}

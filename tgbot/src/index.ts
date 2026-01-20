@@ -60,7 +60,7 @@ async function monitoring() {
   
 
   // не раз в 10m, а раз в 5m±50s
-  setTimeout(monitoring, 5 * 60 * 1000 + (Math.random() - 0.5) * 100000)
+  setTimeout(monitoring, 10 * 60 * 1000 + (Math.random() - 0.5) * 50_000)
 }
 
 setTimeout(monitoring, 2000)
