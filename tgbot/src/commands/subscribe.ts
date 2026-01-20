@@ -306,7 +306,7 @@ createSubscriptionScene.action("save_subscription", async (ctx) => {
         `Отправление: ${d.origin!.name}\n` +
         `Назначение: ${d.destination!.name}\n` +
         `Макс. цена: ${d.maxPrice} руб.` + 
-        d.onlyLowerPlace ? `\nТолько нижнее место` : '',
+        (d.onlyLowerPlace ? `\nТолько нижнее место` : ''),
       Markup.removeKeyboard()
     );
 
